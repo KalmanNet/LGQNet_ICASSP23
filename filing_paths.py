@@ -1,10 +1,15 @@
-path_model_Lor = 'Simulations/Lorenz_Atractor/'
-path_model_NCLT = 'Simulations/NCLT/'
-path_model_Toy = 'Simulations/Toy_problems/'
-path_model_Pendulum = 'Simulations/Pendulum/'
+import os 
+
+path_model_Lor = 'Simulations' + os.path.sep + 'Lorenz_Atractor' + os.path.sep
+path_model_NCLT = 'Simulations' + os.path.sep + 'NCLT' + os.path.sep
+path_model_Toy = 'Simulations' + os.path.sep + 'Toy_problems' + os.path.sep
+path_model_Pendulum = 'Simulations' + os.path.sep + 'Pendulum' + os.path.sep
 
 path_model = path_model_Toy
-path_session = path_model + 'Experiment_GPS_RNN/'
+# path_session = path_model + 'Experiment_GPS_RNN/'
+
+
+
 
 '''
 # Function for Outputting Path (used for cluster)

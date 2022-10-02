@@ -1,6 +1,8 @@
 
 import torch
 import numpy as np
+from torch.distributions.multivariate_normal import MultivariateNormal
+from lqr_utils import lqr_finite, kalman_finite, lqr_infinite
 
 if torch.cuda.is_available():
     dev = torch.device("cuda:0")
@@ -10,16 +12,21 @@ else:
 
 class SystemModel:
 
-    def __init__(self, f, Q, h, R, T, T_test, prior_Q=None, prior_Sigma=None, prior_S=None):
+    def __init__(self, f, G, Q, h, R, T, T_test, prior_Q=None, prior_Sigma=None, prior_S=None, is_mismatch=False):
 
         ####################
         ### Motion Model ###
         ####################
         self.f = f
-
+        self.G = G
+        self.p = self.G.size()[1]
+        
         self.Q = Q
         self.m = self.Q.size()[0]
 
+        # Model mismatch flag
+        self.is_mismatch = is_mismatch
+        
         #########################
         ### Observation Model ###
         #########################
@@ -60,9 +67,9 @@ class SystemModel:
     #####################
     def InitSequence(self, m1x_0, m2x_0):
 
-        self.m1x_0 = m1x_0
-        self.x_prev = m1x_0
-        self.m2x_0 = m2x_0
+        self.m1x_0 = torch.squeeze(m1x_0).to(dev) #m1x_0
+        self.x_prev = torch.squeeze(m1x_0).to(dev) #m1x_0
+        self.m2x_0 = torch.squeeze(m2x_0).to(dev) #m2x_0
 
 
     #########################
@@ -86,45 +93,51 @@ class SystemModel:
     #########################
     ### Generate Sequence ###
     #########################
-    def GenerateSequence(self, Q_gen, R_gen, T):
+    def GenerateSequence(self, T, q_noise, r_noise, steady_state=False, is_control_enable=True):
+        
+        # Get control gain
+        if steady_state:
+            L = self.L_infinite # Corresponds to infinite dlqr
+        else:
+            L = self.L          # Corresponds to finite dlqr
+            
         # Pre allocate an array for current state
-        self.x = torch.empty(size=[self.m, T])
+        self.x = torch.empty(size=[self.m, T+1])
+        self.x[:,0] = self.m1x_0
         # Pre allocate an array for current observation
-        self.y = torch.empty(size=[self.n, T])
+        self.y = torch.empty(size=[self.n, T+1])
+        self.y[:,0] = self.h(self.x[:,0])
         # Set x0 to be x previous
         self.x_prev = self.m1x_0
-        xt = self.x_prev
+        # Pre allocate control
+        u = torch.zeros(self.p, T)
+        
+        # xt = self.x_prev
 
         # Generate Sequence Iteratively
         for t in range(0, T):
-
+            
+            ########################
+            ##### Control Input ####
+            ########################
+            if is_control_enable:
+                # LQR input
+                dx = self.x[:, t-1] # - XT[k]
+                if steady_state:
+                    u[:, t-1] = - torch.matmul(L, dx)
+                else:
+                    u[:, t-1] = - torch.matmul(L[t-1], dx)
+                    
             ########################
             #### State Evolution ###
             ########################
-            xt = self.f(self.x_prev)
-
-            # Process Noise
-            mean = torch.zeros(self.m)
-            eq = np.random.multivariate_normal(mean, Q_gen, 1)
-            eq = torch.transpose(torch.tensor(eq), 0, 1)
-            eq = eq.type(torch.float)
-
-            # Additive Process Noise
-            xt = xt.add(eq)
-
+            xt = self.f(self.x_prev, self.is_mismatch) + self.G.matmul(u[:, t-1]) + q_noise[:,t-1]
+            
             ################
             ### Emission ###
             ################
-            yt = self.h(xt)
-
-            # Observation Noise
-            mean = torch.zeros(self.n)
-            er = np.random.multivariate_normal(mean, R_gen, 1)
-            er = torch.transpose(torch.tensor(er), 0, 1)
-
-            # Additive Observation Noise
-            yt = yt.add(er)
-
+            yt = self.h(xt) + r_noise[:,t-1]
+            
             ########################
             ### Squeeze to Array ###
             ########################
@@ -144,7 +157,7 @@ class SystemModel:
     ######################
     ### Generate Batch ###
     ######################
-    def GenerateBatch(self, size, T, randomInit=False, seqInit=False, T_test=0):
+    def GenerateBatch(self, size, T, Q_noise, R_noise, randomInit=False, seqInit=False, T_test=0, steady_state=False, is_control_enable=True):
 
         # Allocate Empty Array for Input
         self.Input = torch.empty(size, self.n, T)
@@ -155,9 +168,12 @@ class SystemModel:
         ### Generate Examples
         initConditions = self.m1x_0
 
+        # Generate Sequence
         for i in range(0, size):
-            # Generate Sequence
-
+            # Noise sequence    
+            q_noise = Q_noise[i]
+            r_noise = R_noise[i]
+            
             # Randomize initial conditions to get a rich dataset
             if(randomInit):
                 variance = 100
@@ -168,13 +184,13 @@ class SystemModel:
                     initConditions = torch.zeros_like(self.m1x_0)
 
             self.InitSequence(initConditions, self.m2x_0)
-            self.GenerateSequence(self.Q, self.R, T)
+            self.GenerateSequence(T, q_noise, r_noise, steady_state=steady_state, is_control_enable=is_control_enable)
 
+            
             # Training sequence input
-            self.Input[i, :, :] = self.y
-
+            self.Input[i, :, :] = self.y[:,1:]
             # Training sequence output
-            self.Target[i, :, :] = self.x
+            self.Target[i, :, :] = self.x[:,1:]
 
 
     def sampling(self, q, r, gain):
@@ -203,3 +219,48 @@ class SystemModel:
         R_gen = np.transpose(Ar) * Ar
 
         return [Q_gen, R_gen]
+
+    ######################
+    ######## LQR #########
+    ######################
+
+    def InitCostMatrices(self, QN, Qx, Qu):
+        self.QT = QN
+        self.Qx = Qx
+        self.Qu = Qu
+
+    def ComputeLQRgains(self):
+        # self.L, self.S = lqr_finite(self.T, self.f, self.G, self.QT, self.Qx, self.Qu, self.is_mismatch)
+        self.L, self.S = lqr_finite(self.T_test, self.f, self.G, self.QT, self.Qx, self.Qu, self.is_mismatch)
+        self.L_infinite, self.S_infinite = lqr_infinite(self.f, self.G, self.Qx, self.Qu, self.is_mismatch)
+        # if isinstance(self.system, LinearSystem):
+        #     self.L_true, self.S_true = lqr_finite(
+        #         self.T, self.system.F, self.system.G, self.QT, self.Qx, self.Qu)
+        #     self.L_infinite_true, self.S_infinite_true = lqr_infinite(
+        #         self.system.F, self.system.G, self.Qx, self.Qu)
+        # else:
+        #     self.L_true, self.S_true = self.L, self.S
+        #     self.L_infinite_true, self.S_infinite_true = self.L_infinite, self.S_infinite
+        
+        
+        
+    def GenNoiseSequence(self, T, N_samples):
+        
+        # Allocate storage for data
+        seq_Q = torch.empty(N_samples, self.m, T)
+        seq_R = torch.empty(N_samples, self.n, T)
+        
+        # Distributions to sample from 
+        distrib_Q = MultivariateNormal(loc=torch.zeros([self.m]), covariance_matrix=self.Q)
+        distrib_R = MultivariateNormal(loc=torch.zeros([self.n]), covariance_matrix=self.R)
+
+        for k in range(N_samples):
+            for t in range(T):
+                q_sample = distrib_Q.rsample()
+                r_sample = distrib_R.rsample()
+                seq_Q[k,:,t] = q_sample
+                seq_R[k,:,t] = r_sample
+
+        noise = (seq_Q, seq_R)
+        
+        return noise 

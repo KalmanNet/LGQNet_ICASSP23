@@ -3,11 +3,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as func
-
-# from filing_paths import path_model
-# import sys
-# sys.path.insert(1, path_model)
-# from model import getJacobian
+import matplotlib.pyplot as plt
+from filing_paths import path_model
+import sys
+sys.path.insert(1, path_model)
+from model import getJacobian
 
 if torch.cuda.is_available():
     dev = torch.device("cuda:0")
@@ -30,9 +30,13 @@ class KalmanNetNN(torch.nn.Module):
     ### Initialize Kalman Gain Network ###
     ######################################
 
-    def Build(self, SysModel):
+    def Build(self, SysModel, steady_state=False, is_control_enable=True):
 
-        self.InitSystemDynamics(SysModel.f, SysModel.h, SysModel.m, SysModel.n, infoString = "partialInfo")
+        # Set flags
+        self.steady_state = steady_state
+        self.is_control_enable = is_control_enable
+        
+        self.InitSystemDynamics(SysModel, infoString = "partialInfo")
         self.InitSequence(SysModel.m1x_0, SysModel.T)
 
         # # Number of neurons in the 1st hidden layer
@@ -140,7 +144,7 @@ class KalmanNetNN(torch.nn.Module):
     ##################################
     ### Initialize System Dynamics ###
     ##################################
-    def InitSystemDynamics(self, f, h, m, n, infoString = 'fullInfo'):
+    def InitSystemDynamics(self, SysModel, infoString = 'fullInfo'):
         
         if(infoString == 'partialInfo'):
             self.fString ='ModInacc'
@@ -150,19 +154,20 @@ class KalmanNetNN(torch.nn.Module):
             self.hString ='ObsAcc'
         
         # Set State Evolution Function
-        self.f = f
-        self.m = m
-
+        self.f = SysModel.f
+        self.m = SysModel.m
+        self.G = SysModel.G
+        self.p = SysModel.p
         # Set Observation Function
-        self.h = h
-        self.n = n
+        self.h = SysModel.h
+        self.n = SysModel.n
 
     ###########################
     ### Initialize Sequence ###
     ###########################
     def InitSequence(self, M1_0, T):
         self.T = T
-        self.x_out = torch.empty(self.m, T).to(dev, non_blocking=True)
+        # self.x_out = torch.empty(self.m, T).to(dev, non_blocking=True)
 
         self.m1x_posterior = M1_0.to(dev, non_blocking=True)
         self.m1x_posterior_previous = self.m1x_posterior.to(dev, non_blocking=True)
@@ -176,9 +181,9 @@ class KalmanNetNN(torch.nn.Module):
     ######################
     ### Compute Priors ###
     ######################
-    def step_prior(self):
+    def step_prior(self, u):
         # Predict the 1-st moment of x
-        self.m1x_prior = self.f(self.m1x_posterior)
+        self.m1x_prior = self.f(self.m1x_posterior) + torch.matmul(self.G, u)
 
         # Predict the 1-st moment of y
         self.m1y = self.h(self.m1x_prior)
@@ -208,10 +213,10 @@ class KalmanNetNN(torch.nn.Module):
     #######################
     ### Kalman Net Step ###
     #######################
-    def KNet_step(self, y):
+    def KNet_step(self, y, u):
 
         # Compute Priors
-        self.step_prior()
+        self.step_prior(u)
 
         # Compute Kalman Gain
         self.step_KGain_est(y)
@@ -221,9 +226,10 @@ class KalmanNetNN(torch.nn.Module):
         self.i += 1
 
         # Innovation
-        y_obs = torch.unsqueeze(y, 1)
-        dy = y_obs - self.m1y
-
+        # y_obs = torch.unsqueeze(y, 1)
+        # dy = y_obs - self.m1y
+        dy = y - self.m1y
+        
         # Compute the 1-st posterior moment
         INOV = torch.matmul(self.KGain, dy)
         self.m1x_posterior_previous = self.m1x_posterior
@@ -317,14 +323,14 @@ class KalmanNetNN(torch.nn.Module):
     ###############
     ### Forward ###
     ###############
-    def forward(self, y):
+    def forward(self, y, u):
         y = y.to(dev, non_blocking=True)
 
         '''
         for t in range(0, self.T):
             self.x_out[:, t] = self.KNet_step(y[:, t])
         '''
-        self.x_out = self.KNet_step(y)
+        self.x_out = self.KNet_step(y, u)
 
         return self.x_out
 

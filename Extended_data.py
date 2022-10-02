@@ -14,17 +14,22 @@ else:
 ### Size of DataSet ###
 #######################
 
-# Number of Training Examples
-N_E = 1000
+# # Number of Training Examples
+# N_E = 1000
 
-# Number of Cross Validation Examples
-N_CV = 10
+# # Number of Cross Validation Examples
+# N_CV = 10
 
-N_T = 200
+# N_T = 200
 
 # Sequence Length
 # T = 20
 # T_test = 20
+
+# Train/Validation/Test data size
+N_train = 10000
+N_val = 2000
+N_test = 2000
 
 #################
 ## Design #10 ###
@@ -95,26 +100,38 @@ def DataGen_True(SysModel_data, fileName, T):
     #             "Obs":[test_input]},fileName)
     torch.save([test_input, test_target], fileName)
 
-def DataGen(SysModel_data, fileName, T, T_test,randomInit=False):
+def DataGen(SysModel_data, fileName, training_noise, validation_noise, test_noise, randomInit=False, steady_state=False, is_control_enable=True):
 
+    T = SysModel_data.T
+    T_test = SysModel_data.T_test
+    N_train = training_noise[0].size()[0]
+    N_val = validation_noise[0].size()[0]
+    N_test = test_noise[0].size()[0]
+    
     ##################################
     ### Generate Training Sequence ###
     ##################################
-    SysModel_data.GenerateBatch(N_E, T, randomInit=randomInit)
+    # Get Process/Observation Noise
+    Q_noise, R_noise = training_noise
+    SysModel_data.GenerateBatch(N_train, T, Q_noise, R_noise, randomInit=randomInit, seqInit=False, T_test=0, steady_state=False, is_control_enable=True)
     training_input = SysModel_data.Input
     training_target = SysModel_data.Target
 
     ####################################
     ### Generate Validation Sequence ###
     ####################################
-    SysModel_data.GenerateBatch(N_CV, T, randomInit=randomInit)
+    # Get Process/Observation Noise
+    Q_noise, R_noise = validation_noise
+    SysModel_data.GenerateBatch(N_val, T, Q_noise, R_noise, randomInit=randomInit, seqInit=False, T_test=0, steady_state=False, is_control_enable=True)
     cv_input = SysModel_data.Input
     cv_target = SysModel_data.Target
 
     ##############################
     ### Generate Test Sequence ###
     ##############################
-    SysModel_data.GenerateBatch(N_T, T_test, randomInit=randomInit)
+    # Get Process/Observation Noise
+    Q_noise, R_noise = test_noise
+    SysModel_data.GenerateBatch(N_test, T_test, Q_noise, R_noise, randomInit=randomInit, seqInit=False, T_test=0, steady_state=False, is_control_enable=True)
     test_input = SysModel_data.Input
     test_target = SysModel_data.Target
 
@@ -190,3 +207,33 @@ def Short_Traj_Split(data_target, data_input, T):
     data_target = torch.squeeze(torch.cat(list(data_target), dim=0))
     data_input = torch.squeeze(torch.cat(list(data_input), dim=0))
     return [data_target, data_input]
+
+def NoiseGen(SysModel_data, fileName, N_train, N_val, N_test):
+    # Trajectory length 
+    T = SysModel_data.T_test
+    # Gen training noise sequence
+    training_noise = SysModel_data.GenNoiseSequence(T, N_train)
+    # Gen cross validation noise sequence
+    validation_noise = SysModel_data.GenNoiseSequence(T, N_val)
+    # Gen test noise sequence
+    test_noise = SysModel_data.GenNoiseSequence(T, N_test)
+    
+    #################
+    ### Save Data ###
+    #################
+    torch.save((training_noise, validation_noise, test_noise), fileName)
+    
+def NoiseLoader_GPU(fileName, N_test, N_val, N_train):
+    
+    [training_noise, validation_noise, test_noise] = torch.load(fileName) #torch.utils.data.DataLoader(torch.load(fileName),pin_memory = False)
+    
+    if torch.cuda.is_available():
+        training_noise      = [D[:N_train].to("cuda:0") for D in training_noise]
+        validation_noise    = [D[:N_val].to("cuda:0") for D in validation_noise]
+        test_noise          = [D[:N_test].to("cuda:0") for D in test_noise]
+    else:
+        training_noise      = [D[:N_train] for D in training_noise]
+        validation_noise    = [D[:N_val] for D in validation_noise]
+        test_noise          = [D[:N_test] for D in test_noise]
+    
+    return [training_noise, validation_noise, test_noise]
