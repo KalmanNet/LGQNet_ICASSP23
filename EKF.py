@@ -172,7 +172,7 @@ class ExtendedKalmanFilter:
             # State Model
             self.x[:,t] = self.f(self.x[:, t-1], self.is_mismatch) + self.G.matmul(self.u[:, t-1]) + q_noise[:, t-1] 
             # Observation model
-            yt = self.h(self.x[:,t]) + r_noise[:, t-1]
+            yt = self.h(self.x[:,t], self.is_mismatch) + r_noise[:, t-1]
             # Save Current Observation to Trajectory Array
             self.y[:, t] = torch.squeeze(yt)
             

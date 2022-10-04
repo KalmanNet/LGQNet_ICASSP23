@@ -765,3 +765,71 @@ class Plot_extended(Plot_RTS):
         # plt.title('MSE vs inverse noise variance with inaccurate SS knowledge', fontsize=32)
         plt.grid(True)         
         plt.savefig(fileName)
+        
+        
+    def plot_lqr_and_mse(self, MSE_KF, figSize=(25, 25), fontSize=32, 
+        lineWidth=2, title=None, saveName=None, ylim2=None, ylim3=None, color=['r-o','k-', 'b-', 'g-', 'y-']):
+
+        # Figure
+        f = plt.figure(figsize = figSize)
+        f.suptitle(title, fontsize=fontSize+4)
+        ax1 = f.add_subplot(2,1,1) # LQR
+        ax2 = f.add_subplot(2,1,2) # MSE
+
+        x_plt = torch.tensor(range(0, self.pipeline.N_Epochs))
+
+        # Total training loss each epoch
+        y_plt1 = self.pipeline.Total_loss_train_dB_epoch[x_plt]
+        ax1.plot(x_plt.cpu(), y_plt1.cpu(), color[0], label=loop_legend[0], linewidth=lineWidth)
+
+        # LQR validation loss each epoch
+        y_plt2 = self.pipeline.LQR_val_dB_epoch[x_plt]
+        ax1.plot(x_plt.cpu(), y_plt2.cpu(), color[1], label=loop_legend[1], linewidth=lineWidth)
+
+        # LQR test loss
+        y_plt3 = self.pipeline.LQR_test_dB_avg * torch.ones_like(x_plt)
+        ax1.plot(x_plt.cpu(), y_plt3.cpu(), color[2], label=loop_legend[2], linewidth=lineWidth)
+
+        # LQR loss when using a Kalman filter (i.e. LQG)
+        y_plt4 = self.pipeline.LQG_cost * torch.ones_like(x_plt)
+        ax1.plot(x_plt.cpu(), y_plt4.cpu(), color[3], label=loop_legend[3], linewidth=lineWidth)
+
+        # LQR loss when knowing the state
+        y_plt5 = self.pipeline.LQR_cost * torch.ones_like(x_plt)
+        ax1.plot(x_plt.cpu(), y_plt5.cpu(), color[4], label=loop_legend[4], linewidth=lineWidth)
+
+        if ylim2:
+            ax1.set_ylim(ylim2)
+
+        ax1.legend(fontsize=fontSize)
+        # ax1.set_xlabel('Epoch', fontsize=fontSize)
+        ax1.set_ylabel('Loss Value [dB]', fontsize=fontSize)
+        ax1.set_title("LQG Loss [dB] - per Epoch", fontsize=fontSize)
+
+
+        # MSE validation
+        y_plt1 = self.pipeline.MSE_val_dB_epoch[x_plt]
+        ax2.plot(x_plt.cpu(), y_plt1.cpu(), color[1], label="KNet - Validation", linewidth=lineWidth)
+
+        # MSE test
+        y_plt2 = self.pipeline.MSE_test_dB_avg * torch.ones_like(x_plt)
+        ax2.plot(x_plt.cpu(), y_plt2.cpu(), color[2], label="KNet - Test", linewidth=lineWidth)
+
+        # MSE Kalman filter
+        y_plt3 = MSE_KF * torch.ones_like(x_plt)
+        ax2.plot(x_plt.cpu(), y_plt3.cpu(), color[3], label="KF - Test", linewidth=lineWidth)
+
+        # Noise level
+        y_plt4 = 10 * log10(self.pipeline.ssModel.r2) * torch.ones_like(x_plt)
+        ax2.plot(x_plt.cpu(), y_plt4.cpu(), color[4], label="Noise variance", linewidth=lineWidth)
+        
+        if ylim3:
+            ax2.set_ylim(ylim3)
+
+        ax2.legend(fontsize=fontSize)
+        ax2.set_xlabel('Epoch', fontsize=fontSize)
+        ax2.set_ylabel('Loss Value [dB]', fontsize=fontSize)
+        ax2.set_title("MSE Loss [dB] - per Epoch", fontsize=fontSize)
+
+        if saveName:
+            f.savefig(self.pipeline.folderName + saveName)

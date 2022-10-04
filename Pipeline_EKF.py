@@ -164,7 +164,7 @@ class Pipeline_EKF:
                     x_true[:, t] = self.ssModel.f(x_true[:,t-1],self.ssModel.is_mismatch) + self.ssModel.G.matmul(u[:, t-1]) + q_noise[:,t-1]
                     
                     # Simulate observation
-                    yt = self.ssModel.h(x_true[:, t]) + r_noise[:,t-1]
+                    yt = self.ssModel.h(x_true[:, t], self.ssModel.is_mismatch) + r_noise[:,t-1]
                     
                     # Obtain state estimate from KalmanNet
                     x_hat[:,t] = self.model(yt, u[:,t-1])
@@ -246,7 +246,7 @@ class Pipeline_EKF:
                         x_true[:, t] = self.ssModel.f(x_true[:,t-1], self.ssModel.is_mismatch) + self.ssModel.G.matmul(u[:, t-1]) + q_noise[:,t-1]
                         
                         # Simulate observation
-                        yt = self.ssModel.h(x_true[:, t]) + r_noise[:,t-1]
+                        yt = self.ssModel.h(x_true[:, t], self.ssModel.is_mismatch) + r_noise[:,t-1]
                         
                         # Obtain state estimate from KalmanNet
                         x_hat[:,t] = self.model(yt, u[:,t-1])
@@ -365,7 +365,7 @@ class Pipeline_EKF:
                     x_true[:, t] = self.ssModel.f(x_true[:,t-1], self.ssModel.is_mismatch) + self.ssModel.G.matmul(u[:, t-1]) + q_noise[:,t-1]
                     
                     # Simulate observation
-                    yt = self.ssModel.h(x_true[:, t]) + r_noise[:,t-1]
+                    yt = self.ssModel.h(x_true[:, t], self.ssModel.is_mismatch) + r_noise[:,t-1]
                     
                     # Obtain state estimate from KalmanNet
                     x_hat[:,t] = self.model(yt, u[:,t-1])
